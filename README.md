@@ -10,9 +10,62 @@ The initial phase targets **cake and drink categories**, as their visual present
 
 The project is built in Python and consists of the following core components:
 
-### Data Collection Module
+### Data Collection Module (`data_collection/`)
 
-Collects recipe-related data (images, descriptions, ingredients, etc.) from public networks and open datasets.
+Collects recipe-related data (images, descriptions, ingredients, etc.) from public networks. Self-contained with [MediaCrawler](https://github.com/NanmiCoder/MediaCrawler) vendored as a git submodule.
+
+```text
+data_collection/
+├── config/          # Pydantic-based settings (.env support)
+├── xhs/             # XHS platform SDK (session, API client, search, tracking)
+│   ├── mc_api/      # MediaCrawler integration layer
+│   │   ├── _errors.py   # Error types
+│   │   ├── _symbols.py  # MediaCrawler symbol loader
+│   │   ├── _headers.py  # HTTP header/cookie utils
+│   │   ├── _dom.py      # Playwright DOM helpers
+│   │   ├── _client.py   # Client instantiation
+│   │   └── _search.py   # Search + comment API wrappers
+│   ├── api_client.py    # High-level async API client
+│   ├── search.py        # Keyword search with pagination
+│   ├── session.py       # Session lifecycle + QR auth
+│   └── tag_tracker/     # Tag tracking with scheduling
+├── scrapers/        # Thin scraper layer (uses xhs/ SDK)
+│   ├── base.py      # Abstract scraper interface
+│   └── xhs.py       # XHS cake/drink scraper
+├── pipelines/       # Data normalization to canonical schema
+├── utils/           # Rate limiter, logging helpers
+└── cli.py           # CLI (collect, normalize, tag-track, info)
+vendor/
+└── MediaCrawler/    # Git submodule (DO NOT MODIFY)
+```
+
+**Quick start:**
+
+```bash
+# Clone with submodules
+git clone --recurse-submodules <repo-url>
+
+# Install a local virtualenv
+$env:UV_CACHE_DIR=".uv-cache"
+uv sync
+
+# Run the CLI through uv
+uv run chasing-bread collect
+
+# Search with custom keywords and download images
+uv run chasing-bread collect -k "抹茶蛋糕" -k "珍珠奶茶" --download
+
+# Normalize a raw data file
+uv run chasing-bread normalize data/raw/xhs_蛋糕_5p.json
+
+# Show current config
+uv run chasing-bread info
+
+# Alternative without the console-script shim
+python -m data_collection info
+```
+
+`chasing-bread` is a packaged console script, so calling it directly only works after the project environment is installed and active. In PowerShell, `uv run ...` is the safest default.
 
 ### Data Preprocessing & Filtering
 

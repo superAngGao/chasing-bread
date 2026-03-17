@@ -1,0 +1,140 @@
+"""CLI entry point for the data collection module."""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import typer
+
+from data_collection.config import get_settings
+from data_collection.pipelines.normalize import process_raw_data
+from data_collection.scrapers.xhs import XhsCakeDrinkScraper
+from data_collection.utils.logging_utils import configure_logging
+
+app = typer.Typer(help="Chasing Bread – data collection CLI")
+logger = logging.getLogger(__name__)
+
+
+@app.callback()
+def _setup(debug: bool = typer.Option(False, help="Enable debug logging")) -> None:
+    settings = get_settings()
+    configure_logging(level=settings.log_level, debug=debug)
+    settings.ensure_data_directories()
+
+
+@app.command()
+def collect(
+    keywords: list[str] | None = typer.Option(
+        None,
+        "--keyword",
+        "-k",
+        help="Search keywords (repeatable). Defaults to built-in cake/drink terms.",
+    ),
+    max_pages: int = typer.Option(5, "--pages", "-p", help="Max pages per keyword"),
+    download: bool = typer.Option(False, "--download", "-d", help="Also download images"),
+) -> None:
+    """Search XHS for cake/drink posts and save raw results."""
+    settings = get_settings()
+    kws = keywords or settings.search_keywords
+    scraper = XhsCakeDrinkScraper()
+
+    for kw in kws:
+        result = scraper.search(kw, max_pages=max_pages)
+        if result.items:
+            path = result.save()
+            typer.echo(f"[{kw}] saved {len(result.items)} items → {path}")
+
+            if download and settings.raw_data_dir is not None:
+                img_dir = settings.raw_data_dir / "images" / kw
+                saved = scraper.download_images(result.items, img_dir)
+                typer.echo(f"[{kw}] downloaded {len(saved)} images → {img_dir}")
+        else:
+            typer.echo(f"[{kw}] no items found")
+
+
+@app.command()
+def normalize(
+    input_file: Path = typer.Argument(..., help="Raw JSON file to normalize"),
+    output_file: Path | None = typer.Option(None, "--out", "-o", help="Output path"),
+) -> None:
+    """Normalize a raw data file into the canonical recipe-image schema."""
+    out = process_raw_data(input_file, output_file)
+    typer.echo(f"Processed → {out}")
+
+
+@app.command()
+def info() -> None:
+    """Show current settings and detected paths."""
+    settings = get_settings()
+    vendor_mc = settings.project_root / "vendor" / "MediaCrawler"
+    typer.echo(f"Project root     : {settings.project_root}")
+    typer.echo(f"Data directory   : {settings.data_dir}")
+    typer.echo(f"MediaCrawler     : {vendor_mc} ({'found' if vendor_mc.is_dir() else 'NOT FOUND'})")
+    typer.echo(f"Rate limit       : {settings.rate_limit_rps} rps")
+    typer.echo(f"Default keywords : {', '.join(settings.search_keywords)}")
+
+
+@app.command("tag-track")
+def tag_track(
+    tags: list[str] = typer.Option(
+        ...,
+        "--tag",
+        "-t",
+        help="Tags to track (repeatable).",
+    ),
+    out: Path = typer.Option(
+        "data/raw/tag_tracker.json",
+        "--out",
+        "-o",
+        help="Tracker JSON output file.",
+    ),
+    pages_per_tag: int = typer.Option(3, "--pages", help="Search pages per tag"),
+    page_size: int = typer.Option(20, "--page-size"),
+    max_comments: int = typer.Option(100, "--max-comments", help="Max comments per note"),
+    skip_older_days: int = typer.Option(
+        30, "--skip-older-days", help="Skip detail for notes older than N days"
+    ),
+    once: bool = typer.Option(True, "--once/--schedule", help="Run once (default) or schedule"),
+    run_at: str | None = typer.Option(
+        None, "--run-at", help="Daily run time HH:MM (implies --schedule)"
+    ),
+    interval: float = typer.Option(30.0, "--interval", help="Interval minutes (with --schedule)"),
+    force_qrcode: bool = typer.Option(False, "--force-qrcode"),
+    nologin: bool = typer.Option(False, "--nologin"),
+) -> None:
+    """Track XHS tags over time — search, collect details & comments."""
+    from data_collection.xhs.tag_tracker import (
+        TagTrackConfig,
+        run_daily_scheduler,
+        run_interval_scheduler,
+        run_tracking_once,
+    )
+
+    cfg = TagTrackConfig(
+        tags=tags,
+        out_path=out,
+        pages_per_tag=pages_per_tag,
+        page_size=page_size,
+        max_comments_per_note=max_comments,
+        skip_detail_older_than_days=skip_older_days,
+        force_qrcode=force_qrcode,
+        nologin=nologin,
+        debug=logger.isEnabledFor(logging.DEBUG),
+    )
+
+    if run_at:
+        run_daily_scheduler(cfg, run_at)
+    elif not once:
+        run_interval_scheduler(cfg, interval_minutes=interval)
+    else:
+        summary = run_tracking_once(cfg)
+        typer.echo(
+            f"Done: {summary['notes_discovered']} discovered, "
+            f"{summary['notes_updated']} updated, "
+            f"{summary['notes_skipped_old']} skipped (old)"
+        )
+
+
+if __name__ == "__main__":
+    app()
