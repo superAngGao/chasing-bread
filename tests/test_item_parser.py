@@ -23,11 +23,23 @@ class TestExtractItemId:
         item = {"id": "top", "note_card": {"id": "nested"}}
         assert extract_item_id(item) == "top"
 
+    def test_priority_order(self):
+        """'id' should be checked before 'note_id'."""
+        assert extract_item_id({"id": "first", "note_id": "second"}) == "first"
+
     def test_note_id_variant(self):
         assert extract_item_id({"note_id": "abc"}) == "abc"
 
     def test_noteId_camel_case(self):
         assert extract_item_id({"noteId": "abc"}) == "abc"
+
+    def test_nested_noteCard(self):
+        item = {"noteCard": {"id": "nested_001"}}
+        assert extract_item_id(item) == "nested_001"
+
+    def test_nested_note_card_note_id(self):
+        item = {"note_card": {"note_id": "nested_002"}}
+        assert extract_item_id(item) == "nested_002"
 
     def test_empty_item(self):
         assert extract_item_id({}) == ""
@@ -35,6 +47,15 @@ class TestExtractItemId:
     def test_non_dict(self):
         assert extract_item_id("not a dict") == ""
         assert extract_item_id(None) == ""
+        assert extract_item_id(42) == ""
+
+    def test_empty_string_id_skipped(self):
+        """Empty string values should be skipped."""
+        assert extract_item_id({"id": "", "note_id": "fallback"}) == "fallback"
+
+    def test_non_string_id_skipped(self):
+        """Non-string id values should be skipped."""
+        assert extract_item_id({"id": 123, "note_id": "valid"}) == "valid"
 
 
 class TestExtractNoteIdDelegation:
