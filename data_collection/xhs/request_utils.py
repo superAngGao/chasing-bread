@@ -150,7 +150,11 @@ class XhsRequestThrottler:
         if endpoint == "comment":
             await self._comment_limiter.wait_async()
         if self._cfg.request_jitter_sec > 0:
-            await asyncio.sleep(random.uniform(0, self._cfg.request_jitter_sec))
+            # Gaussian jitter looks more human than uniform distribution
+            jitter = max(
+                0, random.gauss(self._cfg.request_jitter_sec, self._cfg.request_jitter_sec / 3)
+            )
+            await asyncio.sleep(jitter)
 
     def classify_error(self, exc: Exception | str | int) -> ErrorType:
         return self._error_handler.classify(exc)

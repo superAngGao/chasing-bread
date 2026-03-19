@@ -18,6 +18,7 @@ env/
 data/raw/
 data/processed/
 data/logs/
+data/debug/
 
 # IDE
 .vscode/

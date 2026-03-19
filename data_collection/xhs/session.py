@@ -9,6 +9,8 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TypeVar
 
+from data_collection.utils.debug_snapshot import save_snapshot
+from data_collection.xhs.browser_fingerprint import warmup_session
 from data_collection.xhs.qrcode_auth import QrcodeAuthSession, open_qrcode_session
 
 HOME_URL = "https://www.xiaohongshu.com/"
@@ -80,6 +82,8 @@ async def open_xhs_api_session(
                 )
 
         await _wait_for_signing_ready(page=page, timeout_sec=20.0, debug=debug)
+        # Warm up session with human-like browsing before API calls
+        await warmup_session(page)
         if post_login_wait_sec > 0:
             await asyncio.sleep(post_login_wait_sec)
         return session
@@ -146,6 +150,12 @@ async def run_with_xhs_session(
         try:
             return await worker(session)
         except Exception as exc:
+            await save_snapshot(
+                page=session.page,
+                trigger=f"worker_error_{type(exc).__name__}",
+                error=exc,
+                phase="run_with_session",
+            )
             if hold_on_error and not should_force_qrcode_retry(exc, force_qrcode=force_flag):
                 should_hold = True
                 hold_reason = f"{type(exc).__name__}: {exc}"

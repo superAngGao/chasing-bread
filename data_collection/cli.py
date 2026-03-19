@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 @app.callback()
 def _setup(debug: bool = typer.Option(False, help="Enable debug logging")) -> None:
     settings = get_settings()
-    configure_logging(level=settings.log_level, debug=debug)
+    configure_logging(debug=debug or settings.log_level.upper() == "DEBUG")
     settings.ensure_data_directories()
 
 

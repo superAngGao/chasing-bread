@@ -93,10 +93,6 @@ async def _run_tracking_async(
         nologin=nologin,
         debug=debug,
     ) as api:
-        # Verify login
-        if not await api.ping():
-            logger.warning("[tag_tracker] ping failed — session may be invalid")
-
         for tag in tags:
             logger.info("[tag_tracker] === processing tag: %s ===", tag)
             search_items: list[dict[str, Any]] = []

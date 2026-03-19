@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from data_collection.xhs.browser_fingerprint import get_http_headers
+
 
 def cookie_header_to_dict(cookie_header: str) -> dict[str, str]:
     out: dict[str, str] = {}
@@ -17,21 +19,4 @@ def cookie_header_to_dict(cookie_header: str) -> dict[str, str]:
 
 
 def build_headers(cookie_header: str) -> dict[str, str]:
-    return {
-        "accept": "application/json, text/plain, */*",
-        "accept-language": "zh-CN,zh;q=0.9",
-        "cache-control": "no-cache",
-        "content-type": "application/json;charset=UTF-8",
-        "origin": "https://www.xiaohongshu.com",
-        "pragma": "no-cache",
-        "referer": "https://www.xiaohongshu.com/",
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-site",
-        "user-agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/137.0.0.0 Safari/537.36"
-        ),
-        "Cookie": cookie_header,
-    }
+    return get_http_headers(cookie_header)

@@ -11,6 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from data_collection.xhs.browser_fingerprint import (
+    apply_stealth,
+    get_context_options,
+)
+
 DEFAULT_PROFILE_DIRNAME = ".xhs_chromium_profile"
 logger = logging.getLogger(__name__)
 LOGIN_REDIRECT_WAIT_SEC = 5.0
@@ -28,6 +33,14 @@ class QrcodeAuthSession:
     a1: str
 
     async def close(self) -> None:
+        # Save cookies as backup before closing
+        try:
+            state_path = Path(DEFAULT_PROFILE_DIRNAME) / "storage_state.json"
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            await self.context.storage_state(path=str(state_path.resolve()))
+            logger.debug("[xhs_qrcode] saved storage state to %s", state_path)
+        except Exception as exc:
+            logger.debug("[xhs_qrcode] could not save storage state: %s", exc)
         await self.context.close()
         if self.browser is not None:
             await self.browser.close()
@@ -55,12 +68,6 @@ def _extract_cookie_value(cookie_header: str, key: str) -> str:
     return ""
 
 
-def _is_logged_in_cookie_set(cookie_header: str) -> bool:
-    a1 = _extract_cookie_value(cookie_header, "a1")
-    id_token = _extract_cookie_value(cookie_header, "id_token")
-    return bool(a1 and id_token)
-
-
 def _is_cookie_expired(cookie: dict[str, Any]) -> bool:
     expires = cookie.get("expires")
     if not isinstance(expires, (int, float)):
@@ -85,26 +92,6 @@ def _is_logged_in_from_cookies(cookies: list[dict[str, Any]]) -> bool:
     if _is_cookie_expired(id_token):
         return False
     return True
-
-
-def _cookie_login_signals(cookies: list[dict[str, Any]]) -> dict[str, bool]:
-    cookie_map: dict[str, dict[str, Any]] = {}
-    for c in cookies:
-        name = c.get("name")
-        if isinstance(name, str):
-            cookie_map[name] = c
-    a1 = cookie_map.get("a1")
-    id_token = cookie_map.get("id_token")
-    has_a1 = bool(a1 and a1.get("value"))
-    has_id_token = bool(id_token and id_token.get("value"))
-    id_token_expired = bool(id_token and _is_cookie_expired(id_token))
-    cookie_login_ok = has_a1 and has_id_token and not id_token_expired
-    return {
-        "has_a1": has_a1,
-        "has_id_token": has_id_token,
-        "id_token_expired": id_token_expired,
-        "cookie_login_ok": cookie_login_ok,
-    }
 
 
 async def _logged_out_ui_signals(page) -> dict[str, bool]:
@@ -261,11 +248,15 @@ async def _launch_persistent_context_with_fallback(
 ):
     last_exc: Exception | None = None
     logger.info("[xhs_qrcode] launching chromium persistent context...")
+    # IMPORTANT: pass ONLY user_data_dir + headless to persistent context.
+    # Any extra options (viewport, locale, UA, args) can cause Chromium to
+    # partition storage differently, breaking cookie persistence across runs.
     for attempt in range(1, 4):
         try:
             context = await playwright.chromium.launch_persistent_context(
                 user_data_dir=str(profile_dir),
                 headless=False,
+                args=["--disable-blink-features=AutomationControlled"],
             )
             logger.info("[xhs_qrcode] chromium context ready profile_dir=%s", profile_dir)
             return context, profile_dir
@@ -298,6 +289,7 @@ async def _launch_persistent_context_with_fallback(
     context = await playwright.chromium.launch_persistent_context(
         user_data_dir=str(temp_dir),
         headless=False,
+        args=["--disable-blink-features=AutomationControlled"],
     )
     logger.info("[xhs_qrcode] chromium context ready profile_dir=%s", temp_dir)
     if debug:
@@ -328,12 +320,13 @@ async def open_qrcode_session(
     if nologin:
         if debug:
             logger.info("[xhs_qrcode] launching in nologin (incognito) mode")
-        browser = await p.chromium.launch(headless=False)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
-        )
+        ctx_opts = get_context_options(headless=False)
+        launch_args = ctx_opts.pop("args", [])
+        ctx_opts.pop("headless", None)  # headless is a launch param, not context param
+        browser = await p.chromium.launch(headless=False, args=launch_args)
+        context = await browser.new_context(**ctx_opts)
         page = await context.new_page()
+        await apply_stealth(page)
 
         try:
             await page.goto(start_url, wait_until="domcontentloaded")
@@ -435,6 +428,7 @@ async def open_qrcode_session(
     )
     if page is None:
         page = context.pages[-1] if context.pages else await context.new_page()
+    await apply_stealth(page)
     pages_before = len(context.pages)
     for p_ in list(context.pages):
         if p_ is page:
@@ -462,9 +456,51 @@ async def open_qrcode_session(
             await page.goto(start_url, wait_until="domcontentloaded")
         if not force_qrcode:
             cookies = await context.cookies("https://www.xiaohongshu.com")
+
+            # Debug: show what cookies we found in the profile
+            xhs_names = [c.get("name") for c in cookies]
+            a1_cookie = next((c for c in cookies if c.get("name") == "a1"), None)
+            id_token_cookie = next((c for c in cookies if c.get("name") == "id_token"), None)
+            logger.info(
+                "[xhs_qrcode] profile cookies: count=%d names=%s a1=%s id_token=%s",
+                len(cookies),
+                xhs_names[:10],
+                bool(a1_cookie and a1_cookie.get("value")),
+                bool(id_token_cookie and id_token_cookie.get("value")),
+            )
+            if id_token_cookie:
+                logger.info(
+                    "[xhs_qrcode] id_token expires=%s expired=%s",
+                    id_token_cookie.get("expires"),
+                    _is_cookie_expired(id_token_cookie),
+                )
+
+            # If cookies are empty, try restoring from backup storage_state.json
+            if not _is_logged_in_from_cookies(cookies):
+                state_path = profile_dir / "storage_state.json"
+                if state_path.is_file():
+                    logger.info(
+                        "[xhs_qrcode] no valid cookies in profile, restoring from %s",
+                        state_path,
+                    )
+                    try:
+                        import json as _json
+
+                        state_data = _json.loads(state_path.read_text(encoding="utf-8"))
+                        saved_cookies = state_data.get("cookies", [])
+                        if saved_cookies:
+                            await context.add_cookies(saved_cookies)
+                            await page.reload(wait_until="domcontentloaded")
+                            cookies = await context.cookies("https://www.xiaohongshu.com")
+                            logger.info(
+                                "[xhs_qrcode] restored %d cookies from backup",
+                                len(saved_cookies),
+                            )
+                    except Exception as restore_exc:
+                        logger.warning("[xhs_qrcode] cookie restore failed: %s", restore_exc)
+
             cookie_header = _cookies_to_header(cookies)
-            cookie_sig = _cookie_login_signals(cookies)
-            if cookie_sig["cookie_login_ok"]:
+            if _is_logged_in_from_cookies(cookies):
                 a1 = _extract_cookie_value(cookie_header, "a1")
                 return QrcodeAuthSession(
                     playwright=p,
@@ -488,9 +524,7 @@ async def open_qrcode_session(
                     "please keep browser window open and retry"
                 ) from exc
             cookie_header = _cookies_to_header(cookies)
-            cookie_sig = _cookie_login_signals(cookies)
-            has_cookie_set = _is_logged_in_cookie_set(cookie_header)
-            if cookie_sig["cookie_login_ok"] and has_cookie_set:
+            if _is_logged_in_from_cookies(cookies):
                 await asyncio.sleep(LOGIN_REDIRECT_WAIT_SEC)
                 cookies = await context.cookies("https://www.xiaohongshu.com")
                 cookie_header = _cookies_to_header(cookies)
@@ -506,7 +540,7 @@ async def open_qrcode_session(
             if (
                 not login_prompt_triggered
                 and (time.monotonic() - wait_started) >= 20.0
-                and (not cookie_sig["cookie_login_ok"])
+                and not _is_logged_in_from_cookies(cookies)
             ):
                 await _trigger_login_prompt(page, debug=debug)
                 login_prompt_triggered = True

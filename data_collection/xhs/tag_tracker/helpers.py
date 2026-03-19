@@ -36,17 +36,10 @@ def to_int(value: Any) -> int:
 
 
 def extract_note_id(item: dict[str, Any]) -> str:
-    note_card = item.get("note_card") or item.get("noteCard")
-    if isinstance(note_card, dict):
-        for key in ("id", "note_id", "noteId"):
-            value = note_card.get(key)
-            if isinstance(value, str) and value:
-                return value
-    for key in ("id", "note_id", "noteId"):
-        value = item.get(key)
-        if isinstance(value, str) and value:
-            return value
-    return ""
+    """Extract note ID from an item dict. Delegates to item_parser.extract_item_id."""
+    from data_collection.xhs.item_parser import extract_item_id
+
+    return extract_item_id(item)
 
 
 def extract_xsec_token(item: dict[str, Any]) -> str:
