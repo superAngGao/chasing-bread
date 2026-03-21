@@ -32,7 +32,12 @@ data_collection/
 ├── scrapers/        # Thin scraper layer (uses xhs/ SDK)
 │   ├── base.py      # Abstract scraper interface
 │   └── xhs.py       # XHS cake/drink scraper
-├── pipelines/       # Data normalization to canonical schema
+├── pipelines/       # Data normalization + quality filtering
+│   ├── normalize.py    # Normalize raw data to canonical schema
+│   ├── filter.py       # Filter pipeline orchestrator
+│   ├── filters/        # Composable image filters (resolution, blur, aspect ratio, dedup, keywords, CLIP)
+│   ├── report.py       # HTML visual report generation
+│   └── export.py       # Training-format JSONL export
 ├── utils/           # Rate limiter, logging helpers
 └── cli.py           # CLI (collect, normalize, tag-track, info)
 vendor/

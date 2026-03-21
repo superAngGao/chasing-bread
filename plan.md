@@ -4,7 +4,7 @@
 
 XHS scraper, tag tracker, normalize pipeline, CLI. All functional.
 
-## Phase 2A: Data Quality Filtering [NEXT]
+## Phase 2A: Data Quality Filtering [DONE]
 
 Filter raw collected data for quality and relevance before annotation and training.
 
@@ -40,7 +40,7 @@ Filter raw collected data for quality and relevance before annotation and traini
 
 See `docs/phase2a_filtering.md` for full design.
 
-## Phase 2B: Data Annotation & Enhancement [PLANNED]
+## Phase 2B: Data Annotation & Enhancement [NEXT]
 
 Use multimodal model to generate structured captions for filtered images. Builds on CLIP embeddings and category scores from Phase 2A.
 
