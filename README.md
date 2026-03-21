@@ -84,10 +84,6 @@ Supporting scripts and tools for evaluation, debugging, and experimentation — 
 - **Language:** Python
 - **Domain:** Generative AI, image synthesis, recipe generation
 
-## Roadmap
+## Planning
 
-1. Build data collection pipeline for cake/drink images and recipes
-2. Implement preprocessing and filtering module
-3. Train and fine-tune the core image generation model
-4. Expand to full recipe generation (instructions, tastes, ingredients)
-5. Extend beyond cakes/drinks to broader food categories
+See `plan.md` for development roadmap and `docs/` for design documents.

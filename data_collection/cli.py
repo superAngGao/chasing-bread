@@ -136,5 +136,68 @@ def tag_track(
         )
 
 
+@app.command("filter")
+def filter_cmd(
+    input_file: Path = typer.Argument(..., help="Processed JSON file from normalize"),
+    images: Path = typer.Option(..., "--images", "-i", help="Directory with downloaded images"),
+    out: Path = typer.Option("data/filtered/report.json", "--out", "-o", help="Output report JSON"),
+    html: Path = typer.Option("data/filtered/report.html", "--html", help="HTML visual report"),
+    export: Path | None = typer.Option(None, "--export", "-e", help="Export metadata.jsonl path"),
+    clip_threshold: float = typer.Option(0.3, "--clip-threshold", help="CLIP relevance threshold"),
+    min_resolution: int = typer.Option(512, "--min-res", help="Minimum width/height in px"),
+    max_aspect_ratio: float = typer.Option(3.0, "--max-ratio", help="Maximum aspect ratio"),
+    min_blur_var: float = typer.Option(100.0, "--min-blur-var", help="Minimum Laplacian variance"),
+    max_hamming: int = typer.Option(6, "--max-hamming", help="Max hamming distance for dedup"),
+    fail_fast: bool = typer.Option(False, "--fail-fast", help="Stop filters on first rejection"),
+    no_clip: bool = typer.Option(False, "--no-clip", help="Skip CLIP filter (faster)"),
+) -> None:
+    """Filter processed data for quality, relevance, and duplicates."""
+    import json
+
+    from data_collection.pipelines.filter import FilterPipeline, save_report
+    from data_collection.pipelines.filters.aspect_ratio import AspectRatioFilter
+    from data_collection.pipelines.filters.blur import BlurFilter
+    from data_collection.pipelines.filters.duplicate import DuplicateFilter
+    from data_collection.pipelines.filters.negative_keyword import NegativeKeywordFilter
+    from data_collection.pipelines.filters.resolution import ResolutionFilter
+    from data_collection.pipelines.report import generate_html_report
+
+    with open(input_file, encoding="utf-8") as f:
+        data = json.load(f)
+    items = data.get("items", data) if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        items = [items]
+
+    filters = [
+        ResolutionFilter(min_width=min_resolution, min_height=min_resolution),
+        BlurFilter(min_laplacian_var=min_blur_var),
+        AspectRatioFilter(max_ratio=max_aspect_ratio),
+        DuplicateFilter(max_hamming_distance=max_hamming),
+        NegativeKeywordFilter(),
+    ]
+
+    if not no_clip:
+        from data_collection.pipelines.filters.clip_relevance import ClipRelevanceFilter
+
+        embedding_dir = out.parent / "embeddings"
+        filters.append(ClipRelevanceFilter(threshold=clip_threshold, embedding_dir=embedding_dir))
+
+    pipeline = FilterPipeline(filters, fail_fast=fail_fast)
+    report = pipeline.run_batch(items, images)
+
+    save_report(report, out)
+    typer.echo(f"Report: {report.total_images} total, {report.passed} passed, {report.rejected} rejected")
+    typer.echo(f"  → {out}")
+
+    generate_html_report(report, html)
+    typer.echo(f"  → {html}")
+
+    if export is not None:
+        from data_collection.pipelines.export import export_metadata_jsonl
+
+        export_metadata_jsonl(report, export)
+        typer.echo(f"  → {export}")
+
+
 if __name__ == "__main__":
     app()
