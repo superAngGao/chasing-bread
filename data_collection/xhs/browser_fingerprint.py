@@ -60,9 +60,36 @@ _STEALTH_JS_PATH = (
 # Extra JS patches applied after stealth.min.js
 _EXTRA_STEALTH_JS = """\
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-Object.defineProperty(navigator, 'plugins', {
-    get: () => [1, 2, 3, 4, 5]
-});
+(() => {
+    const pluginData = [
+        ['PDF Viewer', 'Portable Document Format', 'internal-pdf-viewer'],
+        ['Chrome PDF Viewer', '', 'internal-pdf-viewer'],
+        ['Chromium PDF Viewer', '', 'internal-pdf-viewer'],
+        ['Microsoft Edge PDF Viewer', '', 'internal-pdf-viewer'],
+        ['WebKit built-in PDF', '', 'internal-pdf-viewer'],
+    ];
+    try {
+        const arr = Object.create(PluginArray.prototype);
+        pluginData.forEach(([name, desc, file], i) => {
+            const p = Object.create(Plugin.prototype);
+            Object.defineProperties(p, {
+                name: {value: name, enumerable: true},
+                description: {value: desc, enumerable: true},
+                filename: {value: file, enumerable: true},
+                length: {value: 1, enumerable: true},
+            });
+            Object.defineProperty(arr, i, {value: p, enumerable: false});
+        });
+        Object.defineProperty(arr, 'length', {value: pluginData.length, enumerable: true});
+        arr.item = function(i) { return this[i] || null; };
+        arr.namedItem = function(n) {
+            for (let i = 0; i < this.length; i++) { if (this[i].name === n) return this[i]; }
+            return null;
+        };
+        arr.refresh = function() {};
+        Object.defineProperty(navigator, 'plugins', {get: () => arr});
+    } catch(e) {}
+})();
 Object.defineProperty(navigator, 'languages', {
     get: () => ['zh-CN', 'zh', 'en']
 });
@@ -90,16 +117,23 @@ def get_launch_args() -> list[str]:
 def get_persistent_context_options(*, headless: bool = False) -> dict[str, Any]:
     """Options for ``launch_persistent_context``.
 
-    MINIMAL options to avoid breaking cookie persistence.
-    Do NOT add geolocation, permissions, or platform-changing settings
-    here — those interfere with profile stability.
+    Must include user_agent and sec-ch-ua headers so the browser identity
+    matches what we send in API request headers.  Keep these values STABLE
+    across restarts — changing them invalidates the cookie profile.
     """
     return {
         "headless": headless,
+        "user_agent": USER_AGENT,
         "viewport": VIEWPORT,
         "locale": LOCALE,
         "timezone_id": TIMEZONE,
         "args": get_launch_args(),
+        "extra_http_headers": {
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "sec-ch-ua": SEC_CH_UA,
+            "sec-ch-ua-mobile": SEC_CH_UA_MOBILE,
+            "sec-ch-ua-platform": SEC_CH_UA_PLATFORM,
+        },
     }
 
 
@@ -151,6 +185,13 @@ async def apply_stealth(page: Any) -> None:
     js = get_stealth_js()
     if js.strip():
         await page.add_init_script(js)
+
+
+async def apply_stealth_to_context(context: Any) -> None:
+    """Inject stealth scripts at context level so they run on every new document."""
+    js = get_stealth_js()
+    if js.strip():
+        await context.add_init_script(js)
 
 
 async def warmup_session(page: Any, *, scrolls: int = 3) -> None:

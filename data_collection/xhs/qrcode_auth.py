@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from data_collection.xhs.browser_fingerprint import (
-    apply_stealth,
+    apply_stealth_to_context,
     get_context_options,
+    get_persistent_context_options,
+    get_stealth_js,
 )
 
 DEFAULT_PROFILE_DIRNAME = ".xhs_chromium_profile"
@@ -248,15 +250,12 @@ async def _launch_persistent_context_with_fallback(
 ):
     last_exc: Exception | None = None
     logger.info("[xhs_qrcode] launching chromium persistent context...")
-    # IMPORTANT: pass ONLY user_data_dir + headless to persistent context.
-    # Any extra options (viewport, locale, UA, args) can cause Chromium to
-    # partition storage differently, breaking cookie persistence across runs.
+    ctx_opts = get_persistent_context_options(headless=False)
     for attempt in range(1, 4):
         try:
             context = await playwright.chromium.launch_persistent_context(
                 user_data_dir=str(profile_dir),
-                headless=False,
-                args=["--disable-blink-features=AutomationControlled"],
+                **ctx_opts,
             )
             logger.info("[xhs_qrcode] chromium context ready profile_dir=%s", profile_dir)
             return context, profile_dir
@@ -288,8 +287,7 @@ async def _launch_persistent_context_with_fallback(
     )
     context = await playwright.chromium.launch_persistent_context(
         user_data_dir=str(temp_dir),
-        headless=False,
-        args=["--disable-blink-features=AutomationControlled"],
+        **ctx_opts,
     )
     logger.info("[xhs_qrcode] chromium context ready profile_dir=%s", temp_dir)
     if debug:
@@ -325,8 +323,8 @@ async def open_qrcode_session(
         ctx_opts.pop("headless", None)  # headless is a launch param, not context param
         browser = await p.chromium.launch(headless=False, args=launch_args)
         context = await browser.new_context(**ctx_opts)
+        await apply_stealth_to_context(context)
         page = await context.new_page()
-        await apply_stealth(page)
 
         try:
             await page.goto(start_url, wait_until="domcontentloaded")
@@ -418,6 +416,8 @@ async def open_qrcode_session(
     context, profile_dir = await _launch_persistent_context_with_fallback(
         p, profile_dir=profile_dir, debug=debug
     )
+    # Stealth at context level: applies to all future navigations
+    await apply_stealth_to_context(context)
     page = next(
         (
             p_
@@ -428,7 +428,13 @@ async def open_qrcode_session(
     )
     if page is None:
         page = context.pages[-1] if context.pages else await context.new_page()
-    await apply_stealth(page)
+    # Patch the current document if it was already loaded from profile
+    _stealth_js = get_stealth_js()
+    if _stealth_js.strip():
+        try:
+            await page.evaluate(_stealth_js)
+        except Exception:
+            pass
     pages_before = len(context.pages)
     for p_ in list(context.pages):
         if p_ is page:
