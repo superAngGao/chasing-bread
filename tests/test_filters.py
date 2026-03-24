@@ -22,6 +22,7 @@ from data_collection.pipelines.export import export_metadata_jsonl
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def make_image(tmp_path: Path):
     """Factory fixture: create a test image with given size and content."""
@@ -314,21 +315,25 @@ class TestImageRecord:
 class TestFilterPipeline:
     def test_single_image_all_pass(self, make_image, sample_metadata):
         img = make_image(width=1024, height=1024, noise=True)
-        pipeline = FilterPipeline([
-            ResolutionFilter(min_width=512, min_height=512),
-            AspectRatioFilter(max_ratio=3.0),
-            NegativeKeywordFilter(),
-        ])
+        pipeline = FilterPipeline(
+            [
+                ResolutionFilter(min_width=512, min_height=512),
+                AspectRatioFilter(max_ratio=3.0),
+                NegativeKeywordFilter(),
+            ]
+        )
         record = pipeline.run(img, sample_metadata)
         assert record.overall_passed is True
         assert len(record.verdicts) == 3
 
     def test_single_image_resolution_fail(self, make_image, sample_metadata):
         img = make_image(width=100, height=100, noise=True)
-        pipeline = FilterPipeline([
-            ResolutionFilter(min_width=512, min_height=512),
-            AspectRatioFilter(max_ratio=3.0),
-        ])
+        pipeline = FilterPipeline(
+            [
+                ResolutionFilter(min_width=512, min_height=512),
+                AspectRatioFilter(max_ratio=3.0),
+            ]
+        )
         record = pipeline.run(img, sample_metadata)
         assert record.overall_passed is False
         assert record.verdicts["resolution"].passed is False

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 from typing import Any
 
 from ._client import get_client
@@ -16,19 +18,48 @@ async def get_note_all_comments(
     note_id: str,
     xsec_token: str,
     max_count: int,
-    crawl_interval: float = 1.0,
+    crawl_interval: float = 8.0,
 ) -> list[dict[str, Any]]:
+    """Paginated comment fetching with Gaussian jitter between requests.
+
+    crawl_interval is the mean delay between pages (actual delay is
+    Gaussian-jittered around this value).
+    """
     client = await get_client(page=page, cookie_header=cookie_header)
-    try:
-        data_obj = await client.get_note_comments(note_id=note_id, xsec_token=xsec_token, cursor="")
-    except XhsApiError:
-        raise
-    except Exception as exc:
-        logger.warning("[mc_api] comment collection failed note_id=%s: %s", note_id, exc)
-        return []
-    del crawl_interval
-    comments = data_obj.get("comments", []) if isinstance(data_obj, dict) else []
-    return [x for x in comments if isinstance(x, dict)]
+    result: list[dict[str, Any]] = []
+    cursor = ""
+    has_more = True
+
+    while has_more and len(result) < max_count:
+        try:
+            data_obj = await client.get_note_comments(
+                note_id=note_id, xsec_token=xsec_token, cursor=cursor
+            )
+        except XhsApiError:
+            raise
+        except Exception as exc:
+            logger.warning("[mc_api] comment fetch failed note_id=%s: %s", note_id, exc)
+            break
+
+        if not isinstance(data_obj, dict):
+            break
+
+        comments = data_obj.get("comments", [])
+        if not isinstance(comments, list) or not comments:
+            break
+
+        remaining = max_count - len(result)
+        result.extend(c for c in comments[:remaining] if isinstance(c, dict))
+
+        has_more = bool(data_obj.get("has_more", False))
+        cursor = data_obj.get("cursor", "")
+
+        if has_more and len(result) < max_count:
+            # Gaussian jitter around crawl_interval for human-like pacing
+            delay = max(2.0, random.gauss(crawl_interval, crawl_interval / 3))
+            await asyncio.sleep(delay)
+
+    return result
 
 
 async def get_note_by_id(

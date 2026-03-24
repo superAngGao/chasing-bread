@@ -237,11 +237,23 @@ class XhsApiClient:
             extra=extra,
         )
 
+    _CAPTCHA_CODES = {461, 471}
+
     async def _handle_api_error(self, exc: XhsApiError, *, endpoint: str) -> bool:
         """Handle auth/verification errors. Returns True if recovered and caller should retry."""
         payload = exc.payload if isinstance(exc.payload, dict) else {}
 
-        # Snapshot on every unexpected error
+        # CAPTCHA / slider verification — don't retry, don't snapshot (noisy).
+        # Let the caller's rate-limit handler deal with cooldown.
+        if exc.code in self._CAPTCHA_CODES or "captcha" in (exc.msg or "").lower():
+            logger.warning(
+                "[api_client] CAPTCHA detected on %s (code=%s), not retrying",
+                endpoint,
+                exc.code,
+            )
+            return False
+
+        # Snapshot on every other unexpected error
         await self._snapshot(
             trigger=f"api_error_{exc.code or 'unknown'}",
             error=exc,
@@ -403,7 +415,15 @@ class XhsApiClient:
             except Exception as exc:
                 cooldown = await self.throttler.handle_comment_rate_limit(exc)
                 if cooldown > 0:
-                    continue
+                    # CAPTCHA/rate-limit: abort this note's comments entirely.
+                    # Don't retry — let the tracker's streak cooldown decide
+                    # when it's safe to fetch comments for the next note.
+                    logger.warning(
+                        "[api_client] comment rate-limited note=%s, aborting comments (cooldown=%.0fs)",
+                        note_id,
+                        cooldown,
+                    )
+                    break
                 logger.warning("[api_client] get_all_comments error note=%s: %s", note_id, exc)
                 break
 

@@ -33,6 +33,9 @@ class XhsErrorHandler:
     def __init__(self, logger: logging.Logger | None = None):
         self.logger = logger or logging.getLogger(__name__)
 
+    # HTTP status codes that indicate CAPTCHA / rate-limit from XHS
+    _CAPTCHA_CODES = {461, 471}
+
     def classify(self, exc: Exception | str | int) -> ErrorType:
         code: int | None = None
         msg: str = ""
@@ -45,18 +48,26 @@ class XhsErrorHandler:
         else:
             msg = str(exc)
 
+        # CAPTCHA / slider verification (HTTP 461/471)
+        if code in self._CAPTCHA_CODES:
+            return ErrorType.RATE_LIMIT
+        # Also detect 461 in error message strings (MediaCrawler format)
+        msg_lower = msg.lower()
+        if " 461" in msg or "status code 461" in msg_lower or "captcha" in msg_lower:
+            return ErrorType.RATE_LIMIT
+
         if is_account_state_error(code, msg):
             if code in {-100, -101, -104} or "登录" in msg:
                 return ErrorType.AUTH_INVALID
             return ErrorType.RATE_LIMIT
 
-        if code == 300012 or "network connection" in msg.lower():
+        if code == 300012 or "network connection" in msg_lower:
             return ErrorType.IP_BLOCK
 
-        if code == -510001 or "note status abnormal" in msg.lower():
+        if code == -510001 or "note status abnormal" in msg_lower:
             return ErrorType.NOTE_ABNORMAL
 
-        if "timeout" in msg.lower() or "connection" in msg.lower():
+        if "timeout" in msg_lower or "connection" in msg_lower:
             return ErrorType.NETWORK_ERROR
 
         return ErrorType.UNKNOWN

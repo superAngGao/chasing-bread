@@ -2,12 +2,14 @@
 
 from data_collection.xhs.tag_tracker.config import TagTrackConfig
 from data_collection.xhs.tag_tracker.tracker import (
+    AccountStateAbort,
     run_daily_scheduler,
     run_interval_scheduler,
     run_tracking_once,
 )
 
 __all__ = [
+    "AccountStateAbort",
     "TagTrackConfig",
     "run_tracking_once",
     "run_daily_scheduler",

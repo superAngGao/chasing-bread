@@ -16,13 +16,25 @@ class TagTrackConfig:
     top_commenters_per_note: int = 10
     max_history_per_note: int = 180
     skip_detail_older_than_days: int = 30
+    max_new_items_per_tag: int = 20
 
     # Rate limiting
     max_rps: float = 0.4
-    comment_max_rps: float = 0.2
+    comment_max_rps: float = 0.1  # 1 request per 10s — comment endpoint is heavily protected
     request_jitter_sec: float = 0.25
-    comment_failure_streak_threshold: int = 5
-    comment_failure_cooldown_sec: float = 120.0
+    comment_jitter_sec: float = 3.0  # Gaussian jitter mean for comments (adds 2-5s)
+    comment_failure_streak_threshold: int = 3  # fewer failures before cooldown
+    comment_failure_cooldown_sec: float = 300.0  # 5 min base cooldown
+
+    # Auto-expand tags
+    auto_expand_tags: bool = True
+    auto_expand_hit_rate_threshold: float = 0.3
+    max_auto_expand_tags: int = 10
+
+    # Refresh cached notes
+    refresh_cached: bool = True
+    stable_max_rounds: int = 3
+    stable_round_delay_sec: float = 1.0
 
     # Session
     login_timeout_sec: int = 180

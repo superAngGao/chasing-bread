@@ -40,6 +40,21 @@ class TestClassify:
         exc = XhsApiError(endpoint="test", code=-510001, msg="", payload=None)
         assert handler.classify(exc) == ErrorType.NOTE_ABNORMAL
 
+    def test_captcha_by_code_461(self, handler):
+        exc = XhsApiError(endpoint="test", code=461, msg="", payload=None)
+        assert handler.classify(exc) == ErrorType.RATE_LIMIT
+
+    def test_captcha_by_code_471(self, handler):
+        exc = XhsApiError(endpoint="test", code=471, msg="", payload=None)
+        assert handler.classify(exc) == ErrorType.RATE_LIMIT
+
+    def test_captcha_by_message(self, handler):
+        msg = "CAPTCHA appeared, request failed, Verifytype: 124"
+        assert handler.classify(msg) == ErrorType.RATE_LIMIT
+
+    def test_captcha_461_in_message(self, handler):
+        assert handler.classify("status code 461") == ErrorType.RATE_LIMIT
+
     def test_unknown_error(self, handler):
         assert handler.classify("something random happened") == ErrorType.UNKNOWN
 
