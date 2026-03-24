@@ -61,20 +61,23 @@ class TestFingerprintConsistency:
 
 
 class TestPersistentContextOptions:
-    """Persistent context must be MINIMAL to preserve cookies across runs."""
+    """Persistent context includes identity headers for consistent fingerprint."""
 
-    def test_no_user_agent_override(self):
+    def test_has_user_agent(self):
         opts = get_persistent_context_options()
-        assert "user_agent" not in opts
+        assert "user_agent" in opts
+        assert "Chrome" in opts["user_agent"]
 
     def test_no_geolocation(self):
         opts = get_persistent_context_options()
         assert "geolocation" not in opts
         assert "permissions" not in opts
 
-    def test_no_extra_headers(self):
+    def test_has_sec_ch_ua_headers(self):
         opts = get_persistent_context_options()
-        assert "extra_http_headers" not in opts
+        headers = opts.get("extra_http_headers", {})
+        assert "sec-ch-ua" in headers
+        assert "sec-ch-ua-platform" in headers
 
     def test_has_anti_detection_args(self):
         opts = get_persistent_context_options()

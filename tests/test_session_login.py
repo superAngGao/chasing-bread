@@ -150,7 +150,8 @@ class TestHandleApiError:
     def _isolate_snapshots(self, tmp_path, monkeypatch):
         """Prevent tests from writing snapshots to data/debug/."""
         monkeypatch.setattr(
-            "data_collection.utils.debug_snapshot._DEBUG_DIR", tmp_path,
+            "data_collection.utils.debug_snapshot._DEBUG_DIR",
+            tmp_path,
         )
 
     def _make_client(self) -> XhsApiClient:

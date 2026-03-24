@@ -75,13 +75,75 @@ def info() -> None:
     typer.echo(f"Default keywords : {', '.join(settings.search_keywords)}")
 
 
+def _parse_tags(
+    tag_options: list[str] | None,
+    tags_str: str | None,
+    tags_file: Path | None,
+) -> list[str]:
+    """Merge tags from --tag, --tags (JSON list or comma-separated), and --tags-file.
+
+    Accepts:
+        --tags '["抹茶蛋糕","珍珠奶茶"]'   (JSON array)
+        --tags "抹茶蛋糕,珍珠奶茶"          (comma-separated)
+        --tag "抹茶蛋糕" --tag "珍珠奶茶"   (repeatable)
+        --tags-file tags.txt               (one per line)
+    """
+    import json as _json
+
+    result: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: str) -> None:
+        t = raw.strip()
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            result.append(t)
+
+    def _add_many(raw: str) -> None:
+        for part in raw.split(","):
+            _add(part)
+
+    if tag_options:
+        for t in tag_options:
+            _add(t)
+    if tags_str:
+        s = tags_str.strip()
+        if s.startswith("["):
+            try:
+                parsed = _json.loads(s)
+                if isinstance(parsed, list):
+                    for t in parsed:
+                        if isinstance(t, str):
+                            _add(t)
+                else:
+                    _add_many(s)
+            except _json.JSONDecodeError:
+                _add_many(s)
+        else:
+            _add_many(s)
+    if tags_file and tags_file.exists():
+        for line in tags_file.read_text(encoding="utf-8").splitlines():
+            _add(line)
+    return result
+
+
 @app.command("tag-track")
 def tag_track(
-    tags: list[str] = typer.Option(
-        ...,
+    tag_options: list[str] | None = typer.Option(
+        None,
         "--tag",
         "-t",
         help="Tags to track (repeatable).",
+    ),
+    tags_str: str | None = typer.Option(
+        None,
+        "--tags",
+        help='Comma-separated tags, e.g. "美食,探店,抹茶蛋糕".',
+    ),
+    tags_file: Path | None = typer.Option(
+        None,
+        "--tags-file",
+        help="File with one tag per line.",
     ),
     out: Path = typer.Option(
         "data/raw/tag_tracker.json",
@@ -94,6 +156,23 @@ def tag_track(
     max_comments: int = typer.Option(100, "--max-comments", help="Max comments per note"),
     skip_older_days: int = typer.Option(
         30, "--skip-older-days", help="Skip detail for notes older than N days"
+    ),
+    auto_expand: bool = typer.Option(
+        True,
+        "--auto-expand/--no-auto-expand",
+        help="Auto-discover related tags from note content.",
+    ),
+    auto_expand_threshold: float = typer.Option(
+        0.3, "--expand-threshold", help="Min tag hit-rate to auto-add (0-1)."
+    ),
+    max_auto_tags: int = typer.Option(10, "--max-auto-tags", help="Max tags to auto-add per run."),
+    refresh_cached: bool = typer.Option(
+        True,
+        "--refresh-cached/--no-refresh-cached",
+        help="Refresh previously tracked notes not in current search.",
+    ),
+    stable_max_rounds: int = typer.Option(
+        3, "--stable-rounds", help="Max refresh rounds before declaring stable."
     ),
     once: bool = typer.Option(True, "--once/--schedule", help="Run once (default) or schedule"),
     run_at: str | None = typer.Option(
@@ -111,6 +190,11 @@ def tag_track(
         run_tracking_once,
     )
 
+    tags = _parse_tags(tag_options, tags_str, tags_file)
+    if not tags:
+        typer.echo("Error: provide at least one tag via --tag, --tags, or --tags-file", err=True)
+        raise typer.Exit(1)
+
     cfg = TagTrackConfig(
         tags=tags,
         out_path=out,
@@ -118,6 +202,11 @@ def tag_track(
         page_size=page_size,
         max_comments_per_note=max_comments,
         skip_detail_older_than_days=skip_older_days,
+        auto_expand_tags=auto_expand,
+        auto_expand_hit_rate_threshold=auto_expand_threshold,
+        max_auto_expand_tags=max_auto_tags,
+        refresh_cached=refresh_cached,
+        stable_max_rounds=stable_max_rounds,
         force_qrcode=force_qrcode,
         nologin=nologin,
         debug=logger.isEnabledFor(logging.DEBUG),
@@ -129,10 +218,13 @@ def tag_track(
         run_interval_scheduler(cfg, interval_minutes=interval)
     else:
         summary = run_tracking_once(cfg)
+        auto_tags = summary.get("auto_added_tags", [])
+        auto_str = f", auto-added {len(auto_tags)} tags" if auto_tags else ""
         typer.echo(
             f"Done: {summary['notes_discovered']} discovered, "
             f"{summary['notes_updated']} updated, "
             f"{summary['notes_skipped_old']} skipped (old)"
+            f"{auto_str}"
         )
 
 
@@ -186,7 +278,9 @@ def filter_cmd(
     report = pipeline.run_batch(items, images)
 
     save_report(report, out)
-    typer.echo(f"Report: {report.total_images} total, {report.passed} passed, {report.rejected} rejected")
+    typer.echo(
+        f"Report: {report.total_images} total, {report.passed} passed, {report.rejected} rejected"
+    )
     typer.echo(f"  → {out}")
 
     generate_html_report(report, html)

@@ -148,8 +148,9 @@ class TestRequestThrottleConfig:
     def test_defaults(self):
         cfg = RequestThrottleConfig()
         assert cfg.global_max_rps == 0.4
-        assert cfg.comment_max_rps == 0.2
+        assert cfg.comment_max_rps == 0.1
         assert cfg.request_jitter_sec == 0.25
+        assert cfg.comment_jitter_sec == 3.0
 
     def test_custom(self):
         cfg = RequestThrottleConfig(global_max_rps=1.0, request_jitter_sec=0.5)

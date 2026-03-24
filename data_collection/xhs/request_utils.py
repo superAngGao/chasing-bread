@@ -25,10 +25,11 @@ T = TypeVar("T")
 @dataclass(frozen=True, slots=True)
 class RequestThrottleConfig:
     global_max_rps: float = 0.4
-    comment_max_rps: float = 0.2
+    comment_max_rps: float = 0.1  # 1 req per 10s — comment endpoint is heavily protected
     request_jitter_sec: float = 0.25
-    comment_failure_streak_threshold: int = 5
-    comment_failure_cooldown_base_sec: float = 120.0
+    comment_jitter_sec: float = 3.0  # Gaussian jitter mean for comment requests
+    comment_failure_streak_threshold: int = 3
+    comment_failure_cooldown_base_sec: float = 300.0
     comment_failure_cooldown_max_sec: float = 1800.0
     rate_limit_cooldown_min_sec: float = 300.0
     rate_limit_cooldown_max_sec: float = 1800.0
@@ -149,11 +150,13 @@ class XhsRequestThrottler:
         await self._global_limiter.wait_async()
         if endpoint == "comment":
             await self._comment_limiter.wait_async()
-        if self._cfg.request_jitter_sec > 0:
+            # Comments need much larger jitter to avoid CAPTCHA triggers
+            jitter_mean = self._cfg.comment_jitter_sec
+        else:
+            jitter_mean = self._cfg.request_jitter_sec
+        if jitter_mean > 0:
             # Gaussian jitter looks more human than uniform distribution
-            jitter = max(
-                0, random.gauss(self._cfg.request_jitter_sec, self._cfg.request_jitter_sec / 3)
-            )
+            jitter = max(0, random.gauss(jitter_mean, jitter_mean / 3))
             await asyncio.sleep(jitter)
 
     def classify_error(self, exc: Exception | str | int) -> ErrorType:
